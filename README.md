@@ -43,4 +43,6 @@ resolve without a connected wallet.
 
 ## License
 
-MIT
+Business Source License 1.1 (BUSL-1.1) — see [LICENSE](./LICENSE). Non-commercial use is permitted;
+commercial use requires a separate license from the Licensor. The license converts to **MIT** on the
+Change Date (2032-07-04). Third-party dependencies keep their own licenses.
