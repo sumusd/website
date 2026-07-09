@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+/* Force a light/white theme: make the `dark:` variant only apply under an explicit `.dark`
+   ancestor (which we never add), so OS dark-mode no longer flips the UI. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Near-black / near-white, both faintly tinted toward the brand green (hue ~155) — never #000/#fff. */
+  --background: oklch(0.994 0.003 150);
+  --foreground: oklch(0.23 0.012 155);
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  /* Remap Tailwind's black/white tokens once, so every neutral utility (text-black/60,
+     border-black/10, bg-white, …) inherits the brand tint instead of pure #000/#fff. */
+  --color-black: var(--foreground);
+  --color-white: var(--background);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  /* Use the Geist sans loaded in layout.tsx (was falling back to Arial). */
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
