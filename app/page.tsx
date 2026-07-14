@@ -1,6 +1,7 @@
 "use client";
 
 import {ConnectButton} from "@rainbow-me/rainbowkit";
+import Link from "next/link";
 import {useEffect, useMemo, useState} from "react";
 import {formatUnits, parseUnits} from "viem";
 import {
@@ -311,7 +312,15 @@ export default function Home() {
                         <p className="text-sm text-black/55">Aggregated USD stablecoin</p>
                     </div>
                 </div>
-                <ConnectButton showBalance={false} chainStatus="icon" />
+                <div className="flex items-center gap-4">
+                    <Link
+                        href="/integrations"
+                        className="hidden text-sm font-medium text-black/55 transition-colors hover:text-black/80 sm:inline"
+                    >
+                        Integrations
+                    </Link>
+                    <ConnectButton showBalance={false} chainStatus="icon" />
+                </div>
             </header>
 
             <div className="grid items-start gap-10 md:grid-cols-12 md:gap-12">
