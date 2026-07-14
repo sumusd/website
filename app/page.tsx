@@ -33,7 +33,7 @@ const FAQS: {q: string; a: string}[] = [
     },
     {
         q: "How do redemptions work, and why does the rate vary by asset?",
-        a: "Burn SumUSD to receive any flavor the pool holds, as a fungible 1:1 unit swap minus a per-collateral haircut (every flavor is treated as exactly $1). Moderate imbalances are tolerated at the base rate; only when a flavor drifts well off its target weight does the haircut tilt: an over-represented flavor becomes cheaper to redeem (rewarding rebalancing), while a scarce one gets progressively more expensive the closer it is to running out. The basket stays balanced and every flavor is always redeemable. The live rate is quoted before you confirm.",
+        a: "Burn SumUSD to receive any flavor the pool holds, as a fungible 1:1 unit swap minus a per-collateral haircut (every flavor is treated as exactly $1). Moderate imbalances are tolerated at the base rate; only when a flavor drifts well off its target weight does the haircut tilt: an over-represented flavor becomes cheaper to redeem (rewarding rebalancing), while a scarce one gets progressively more expensive the closer it is to running out. The basket stays balanced and every flavor is always redeemable. The live rate is quoted before you confirm. You can also split one redemption across several flavors in a single transaction with “Split across flavors”, which is the cheaper way to exit a large amount without paying the scarcity premium on any one flavor.",
     },
     {
         q: "Is SumUSD over-collateralized?",
@@ -63,6 +63,10 @@ export default function Home() {
     const [collateralIdx, setCollateralIdx] = useState(0);
     const [collateralPicked, setCollateralPicked] = useState(false);
     const [amount, setAmount] = useState("");
+    // Batch redeem: split a burn across several flavors in one tx (normal mode only). One sumUSD amount
+    // per flavor, aligned to COLLATERALS; empty/zero legs are dropped before previewing or submitting.
+    const [batch, setBatch] = useState(false);
+    const [batchAmounts, setBatchAmounts] = useState<string[]>(() => COLLATERALS.map(() => ""));
 
     const collateral = COLLATERALS[collateralIdx];
     // On mint, the input is denominated in the collateral; on redeem, in SumUSD (18 decimals).
@@ -87,6 +91,25 @@ export default function Home() {
     // In this regime single-flavor redeem is gated and holders exit pro-rata via redeemMix.
     const distressed = ratioBps !== undefined && ratioBps <= 1_000_000n && ratioBps < DISTRESS_RATIO_BPS;
     const redeemMixMode = mode === "redeem" && distressed;
+    // Batch redeem is a normal-mode convenience only: below the distress line the engine forces redeemMix.
+    const batchMode = mode === "redeem" && !distressed && batch;
+
+    // The non-zero legs of the batch editor: {flavor, sumUSD amount}. Both preview and submit use this,
+    // so a zero-amount leg (which redeemBatch would revert on) is never sent.
+    const batchLegs = useMemo(
+        () =>
+            COLLATERALS.map((c, i) => {
+                let amt = 0n;
+                try {
+                    amt = batchAmounts[i] ? parseUnits(batchAmounts[i], 18) : 0n;
+                } catch {
+                    amt = 0n;
+                }
+                return {collateral: c, amount: amt};
+            }).filter((l) => l.amount > 0n),
+        [batchAmounts],
+    );
+    const batchTotal = batchLegs.reduce((sum, l) => sum + l.amount, 0n);
 
     // The flavor the pool most needs — used to nudge deposits toward balance.
     const {data: needed} = useReadContract({
@@ -158,7 +181,16 @@ export default function Home() {
         abi: ENGINE_ABI,
         functionName: mode === "mint" ? "previewDeposit" : "previewRedeem",
         args: [collateral.address, parsedAmount],
-        query: {enabled: parsedAmount > 0n && !redeemMixMode},
+        query: {enabled: parsedAmount > 0n && !redeemMixMode && !batchMode},
+    });
+
+    // Net per leg for the batch editor, priced on one snapshot exactly as redeemBatch pays out.
+    const {data: batchPreview} = useReadContract({
+        address: ENGINE_ADDRESS,
+        abi: ENGINE_ABI,
+        functionName: "previewRedeemBatch",
+        args: [batchLegs.map((l) => l.collateral.address), batchLegs.map((l) => l.amount)],
+        query: {enabled: batchMode && batchLegs.length > 0},
     });
 
     // Pro-rata breakdown when distressed: [tokens[], amounts[]].
@@ -175,7 +207,7 @@ export default function Home() {
         abi: ENGINE_ABI,
         functionName: "currentRedeemRateBps",
         args: [collateral.address],
-        query: {enabled: mode === "redeem" && !distressed, refetchInterval: 15_000},
+        query: {enabled: mode === "redeem" && !distressed && !batchMode, refetchInterval: 15_000},
     });
 
     const {data: allowance} = useReadContract({
@@ -217,6 +249,18 @@ export default function Home() {
                 abi: ENGINE_ABI,
                 functionName: "redeemMix",
                 args: [parsedAmount, []],
+            });
+        } else if (batchMode) {
+            // Multi-flavor redeem in one tx; zero minOuts skip per-leg slippage checks.
+            writeContract({
+                address: ENGINE_ADDRESS,
+                abi: ENGINE_ABI,
+                functionName: "redeemBatch",
+                args: [
+                    batchLegs.map((l) => l.collateral.address),
+                    batchLegs.map((l) => l.amount),
+                    batchLegs.map(() => 0n),
+                ],
             });
         } else {
             writeContract({
@@ -385,39 +429,78 @@ export default function Home() {
                         ))}
                     </div>
 
-                    <label htmlFor="amount" className="mb-1 block text-xs text-black/50">
-                        {mode === "mint"
-                            ? "Deposit collateral"
-                            : redeemMixMode
-                              ? "Burn sumUSD (pro-rata)"
-                              : "Burn sumUSD for"}
-                    </label>
-                    <div className="flex gap-2">
-                        <input
-                            id="amount"
-                            inputMode="decimal"
-                            placeholder="0.0"
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-3 py-2 text-lg tabular-nums outline-none transition-colors duration-150 ease-out focus:border-emerald-500/70"
-                        />
-                        <select
-                            value={collateralIdx}
-                            disabled={redeemMixMode}
-                            aria-label={mode === "mint" ? "Collateral to deposit" : "Flavor to redeem"}
-                            onChange={(e) => {
-                                setCollateralPicked(true);
-                                setCollateralIdx(Number(e.target.value));
-                            }}
-                            className="rounded-lg border border-black/10 bg-transparent px-3 py-2 outline-none transition-colors duration-150 ease-out focus:border-emerald-500/70 disabled:opacity-40"
-                        >
+                    {mode === "redeem" && !distressed && (
+                        <div className="mb-3 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setBatch((b) => !b)}
+                                className="text-xs font-medium text-emerald-700 transition-colors hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+                            >
+                                {batch ? "← Single flavor" : "Split across flavors →"}
+                            </button>
+                        </div>
+                    )}
+
+                    {batchMode ? (
+                        <div className="space-y-2">
+                            <p className="mb-1 text-xs text-black/50">Burn sumUSD for each flavor</p>
                             {COLLATERALS.map((c, i) => (
-                                <option key={c.symbol} value={i}>
-                                    {c.symbol}
-                                </option>
+                                <div key={c.symbol} className="flex items-center gap-2">
+                                    <span className="w-16 shrink-0 text-sm text-black/70">{c.symbol}</span>
+                                    <input
+                                        inputMode="decimal"
+                                        placeholder="0.0"
+                                        aria-label={`sumUSD to redeem for ${c.symbol}`}
+                                        value={batchAmounts[i]}
+                                        onChange={(e) =>
+                                            setBatchAmounts((prev) => {
+                                                const next = [...prev];
+                                                next[i] = e.target.value;
+                                                return next;
+                                            })
+                                        }
+                                        className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-3 py-2 text-lg tabular-nums outline-none transition-colors duration-150 ease-out focus:border-emerald-500/70"
+                                    />
+                                </div>
                             ))}
-                        </select>
-                    </div>
+                        </div>
+                    ) : (
+                        <>
+                            <label htmlFor="amount" className="mb-1 block text-xs text-black/50">
+                                {mode === "mint"
+                                    ? "Deposit collateral"
+                                    : redeemMixMode
+                                      ? "Burn sumUSD (pro-rata)"
+                                      : "Burn sumUSD for"}
+                            </label>
+                            <div className="flex gap-2">
+                                <input
+                                    id="amount"
+                                    inputMode="decimal"
+                                    placeholder="0.0"
+                                    value={amount}
+                                    onChange={(e) => setAmount(e.target.value)}
+                                    className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-3 py-2 text-lg tabular-nums outline-none transition-colors duration-150 ease-out focus:border-emerald-500/70"
+                                />
+                                <select
+                                    value={collateralIdx}
+                                    disabled={redeemMixMode}
+                                    aria-label={mode === "mint" ? "Collateral to deposit" : "Flavor to redeem"}
+                                    onChange={(e) => {
+                                        setCollateralPicked(true);
+                                        setCollateralIdx(Number(e.target.value));
+                                    }}
+                                    className="rounded-lg border border-black/10 bg-transparent px-3 py-2 outline-none transition-colors duration-150 ease-out focus:border-emerald-500/70 disabled:opacity-40"
+                                >
+                                    {COLLATERALS.map((c, i) => (
+                                        <option key={c.symbol} value={i}>
+                                            {c.symbol}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </>
+                    )}
 
                     {mode === "mint" && neededIdx >= 0 && (
                         <p className="mt-2 text-xs text-emerald-700">
@@ -451,6 +534,37 @@ export default function Home() {
                                 )}
                             </ul>
                         </div>
+                    ) : batchMode ? (
+                        <div className="mt-3 text-sm text-black/60">
+                            <div className="flex items-baseline justify-between">
+                                <span>You receive</span>
+                                <span className="text-xs tabular-nums text-black/45">
+                                    {batchTotal > 0n
+                                        ? `Burn ${Number(formatUnits(batchTotal, 18)).toLocaleString()} sumUSD`
+                                        : ""}
+                                </span>
+                            </div>
+                            <ul className="mt-1 space-y-0.5">
+                                {batchLegs.length > 0 && batchPreview ? (
+                                    batchLegs.map((l, i) => (
+                                        <li
+                                            key={l.collateral.symbol}
+                                            className="font-medium tabular-nums text-black"
+                                        >
+                                            {Number(
+                                                formatUnits(
+                                                    (batchPreview as readonly bigint[])[i] ?? 0n,
+                                                    l.collateral.decimals,
+                                                ),
+                                            ).toLocaleString()}{" "}
+                                            {l.collateral.symbol}
+                                        </li>
+                                    ))
+                                ) : (
+                                    <li className="text-black/40">—</li>
+                                )}
+                            </ul>
+                        </div>
                     ) : (
                         <p className="mt-3 text-sm text-black/60">
                             You receive:{" "}
@@ -463,7 +577,7 @@ export default function Home() {
                         </p>
                     )}
 
-                    {mode === "redeem" && !distressed && (
+                    {mode === "redeem" && !distressed && !batchMode && (
                         <p className="mt-1 flex items-center justify-between text-xs text-black/50">
                             <span>Current redemption rate</span>
                             <span className="font-medium tabular-nums text-black">
@@ -506,14 +620,19 @@ export default function Home() {
                                 {busy ? "Approving…" : `Approve ${collateral.symbol}`}
                             </Button>
                         ) : (
-                            <Button onClick={handleSubmit} disabled={busy || parsedAmount === 0n}>
+                            <Button
+                                onClick={handleSubmit}
+                                disabled={busy || (batchMode ? batchTotal === 0n : parsedAmount === 0n)}
+                            >
                                 {busy
                                     ? "Confirming…"
                                     : mode === "mint"
                                       ? "Mint sumUSD"
                                       : redeemMixMode
                                         ? "Redeem (pro-rata)"
-                                        : "Redeem"}
+                                        : batchMode
+                                          ? "Redeem batch"
+                                          : "Redeem"}
                             </Button>
                         )}
                     </div>

@@ -44,6 +44,27 @@ export const ENGINE_ABI = [
     },
     {
         type: "function",
+        name: "redeemBatch",
+        stateMutability: "nonpayable",
+        inputs: [
+            {name: "collaterals", type: "address[]"},
+            {name: "sumUsdAmounts", type: "uint256[]"},
+            {name: "minOuts", type: "uint256[]"},
+        ],
+        outputs: [{name: "collateralOuts", type: "uint256[]"}],
+    },
+    {
+        type: "function",
+        name: "previewRedeemBatch",
+        stateMutability: "view",
+        inputs: [
+            {name: "collaterals", type: "address[]"},
+            {name: "sumUsdAmounts", type: "uint256[]"},
+        ],
+        outputs: [{name: "nets", type: "uint256[]"}],
+    },
+    {
+        type: "function",
         name: "previewDeposit",
         stateMutability: "view",
         inputs: [
