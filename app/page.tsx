@@ -44,6 +44,10 @@ const FAQS: {q: string; a: string}[] = [
         a: "A governance-curated whitelist, never permissionless. It prioritizes GENIUS-Act-compliant, US-Treasury-backed payment stablecoins as the core of the basket; other credible designs may be admitted under more conservative risk parameters. The convex redemption haircut keeps the basket balanced by making it progressively more expensive to drain any one flavor.",
     },
     {
+        q: "What must a stablecoin meet to be listed?",
+        a: "Beyond the credibility bar above, a candidate must be technically well-behaved, because the protocol accounts for collateral by its on-chain balance and treats one unit as one dollar. Required properties: standard fixed decimals; non-rebasing, so a balance changes only on transfer and never on its own; no transfer hooks or callbacks; freely transferable with no fee-on-transfer (or a negligible, disclosed one); and honest, immutable metadata. Rebasing, fee-on-transfer, and hook-bearing tokens are excluded, since any of them would silently break the 1:1 unit accounting or redemption. Every listing is a timelocked governance action, so this vetting happens before any deposit of that asset is possible.",
+    },
+    {
         q: "Why is minting sometimes paused?",
         a: "If system backing falls below 99% (for example during a collateral de-peg), new minting pauses automatically so no one can mint into an under-backed pool. It resumes on its own once backing recovers. Redemptions always stay open so holders can exit.",
     },
