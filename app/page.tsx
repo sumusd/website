@@ -306,7 +306,7 @@ export default function Home() {
             <header className="flex items-center justify-between gap-4 border-b border-black/10 pb-6">
                 <div className="flex items-center gap-3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/logo.svg" alt="SumUSD" width={40} height={40} className="h-10 w-10" />
+                    <img src="/sumusd_logo.svg" alt="SumUSD" width={40} height={40} className="h-10 w-10" />
                     <div>
                         <h1 className="text-xl font-semibold tracking-tight">SumUSD</h1>
                         <p className="text-sm text-black/55">Aggregated USD stablecoin</p>

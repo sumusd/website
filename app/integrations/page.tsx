@@ -198,7 +198,7 @@ export default function IntegrationsPage() {
             <header className="flex items-center justify-between gap-4 border-b border-black/10 pb-6">
                 <Link href="/" className="flex items-center gap-3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/logo.svg" alt="SumUSD" width={40} height={40} className="h-10 w-10" />
+                    <img src="/sumusd_logo.svg" alt="SumUSD" width={40} height={40} className="h-10 w-10" />
                     <div>
                         <h1 className="text-xl font-semibold tracking-tight">SumUSD</h1>
                         <p className="text-sm text-black/55">Integrations</p>
@@ -294,7 +294,7 @@ export default function IntegrationsPage() {
                 <div className="flex flex-wrap items-center gap-6">
                     <div className="flex items-center gap-4 rounded-2xl border border-black/10 px-6 py-5">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/logo.svg" alt="SumUSD logo" width={56} height={56} className="h-14 w-14" />
+                        <img src="/sumusd_logo.svg" alt="SumUSD logo" width={56} height={56} className="h-14 w-14" />
                         <div>
                             <p className="text-lg font-semibold tracking-tight">SumUSD</p>
                             <p className="text-sm text-black/55">Sigma mark · emerald</p>
@@ -302,12 +302,12 @@ export default function IntegrationsPage() {
                     </div>
                     <ul className="flex flex-col gap-1.5 text-sm">
                         <li>
-                            <a className="text-emerald-700 hover:text-emerald-600" href="/logo.svg" download>
+                            <a className="text-emerald-700 hover:text-emerald-600" href="/sumusd_logo.svg" download>
                                 Logo — SVG ↓
                             </a>
                         </li>
                         <li>
-                            <a className="text-emerald-700 hover:text-emerald-600" href="/logo.png" download>
+                            <a className="text-emerald-700 hover:text-emerald-600" href="/sumusd_logo.png" download>
                                 Logo — PNG ↓
                             </a>
                         </li>
