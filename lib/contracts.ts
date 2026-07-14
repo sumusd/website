@@ -117,6 +117,33 @@ export const ENGINE_ABI = [
         inputs: [{name: "collateral", type: "address"}],
         outputs: [{name: "", type: "uint256"}],
     },
+    // Price-feed health. `livePriceWad` is the raw current oracle read (ok=false => feed down);
+    // `valuationPriceWad` is the price actually used for backing (live, or the haircut last-good
+    // fallback within its grace window, else 0); `lastGoodPriceAt` is when the cache was last warmed.
+    {
+        type: "function",
+        name: "livePriceWad",
+        stateMutability: "view",
+        inputs: [{name: "collateral", type: "address"}],
+        outputs: [
+            {name: "priceWad", type: "uint256"},
+            {name: "ok", type: "bool"},
+        ],
+    },
+    {
+        type: "function",
+        name: "valuationPriceWad",
+        stateMutability: "view",
+        inputs: [{name: "collateral", type: "address"}],
+        outputs: [{name: "", type: "uint256"}],
+    },
+    {
+        type: "function",
+        name: "lastGoodPriceAt",
+        stateMutability: "view",
+        inputs: [{name: "token", type: "address"}],
+        outputs: [{name: "", type: "uint256"}],
+    },
 ] as const;
 
 /// Standard ERC-20 subset for balances, allowances, and approvals.

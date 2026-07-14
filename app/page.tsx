@@ -128,6 +128,27 @@ export default function Home() {
     const sharePct = (value: bigint) =>
         compositionTotal > 0n ? Number((value * 10_000n) / compositionTotal) / 100 : 0;
 
+    // Per-flavor price-feed health: [livePriceWad(price, ok), lastGoodPriceAt, valuationPriceWad] × N.
+    const {data: feedReads} = useReadContracts({
+        contracts: COLLATERALS.flatMap((c) => [
+            {address: ENGINE_ADDRESS, abi: ENGINE_ABI, functionName: "livePriceWad", args: [c.address]},
+            {address: ENGINE_ADDRESS, abi: ENGINE_ABI, functionName: "lastGoodPriceAt", args: [c.address]},
+            {address: ENGINE_ADDRESS, abi: ENGINE_ABI, functionName: "valuationPriceWad", args: [c.address]},
+        ]),
+        query: {refetchInterval: 15_000},
+    });
+    const nowSecs = Math.floor(Date.now() / 1000);
+    const feeds = COLLATERALS.map((c, i) => {
+        const live = feedReads?.[i * 3]?.result as readonly [bigint, boolean] | undefined;
+        return {
+            collateral: c,
+            livePrice: live?.[0] ?? 0n,
+            liveOk: live?.[1] ?? false,
+            lastAt: (feedReads?.[i * 3 + 1]?.result as bigint | undefined) ?? 0n,
+            valuation: (feedReads?.[i * 3 + 2]?.result as bigint | undefined) ?? 0n,
+        };
+    });
+
     const {data: preview} = useReadContract({
         address: ENGINE_ADDRESS,
         abi: ENGINE_ABI,
@@ -294,6 +315,43 @@ export default function Home() {
                                 </li>
                             ))}
                         </ul>
+                    </div>
+
+                    {/* Price feeds — the latest oracle read per flavor, with feed health. */}
+                    <div className="mt-8">
+                        <p className="text-xs font-medium uppercase tracking-wider text-black/45">Price feeds</p>
+                        <ul className="mt-2 divide-y divide-black/[0.06] text-sm">
+                            {feeds.map(({collateral: c, livePrice, liveOk, lastAt, valuation}) => {
+                                const status = liveOk
+                                    ? {price: livePrice, label: "live", dot: "bg-emerald-500", tone: "text-black/45"}
+                                    : valuation > 0n
+                                      ? {
+                                            price: valuation,
+                                            label: `stale · last good ${feedAge(nowSecs, lastAt)}`,
+                                            dot: "bg-amber-500",
+                                            tone: "text-amber-700",
+                                        }
+                                      : {price: 0n, label: "no price", dot: "bg-red-500", tone: "text-red-600"};
+                                return (
+                                    <li key={c.symbol} className="flex items-center justify-between gap-3 py-1.5">
+                                        <span className="flex items-center gap-1.5">
+                                            <span className={`h-2 w-2 rounded-full ${status.dot}`} aria-hidden />
+                                            <span className="text-black/70">{c.symbol}</span>
+                                        </span>
+                                        <span className="flex items-baseline gap-2 tabular-nums">
+                                            <span className="font-medium text-black">
+                                                {status.price > 0n ? `$${formatPrice(status.price)}` : "—"}
+                                            </span>
+                                            <span className={`text-xs ${status.tone}`}>{status.label}</span>
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                        <p className="mt-2 text-xs leading-relaxed text-black/45">
+                            The latest oracle read backing each flavor. A down feed falls back to its last good
+                            price (haircut) for a short window, so a brief outage doesn&apos;t disrupt the system.
+                        </p>
                     </div>
 
                     <p className="mt-8 max-w-prose text-sm leading-relaxed text-black/60">
@@ -479,6 +537,19 @@ export default function Home() {
             </section>
         </main>
     );
+}
+
+function formatPrice(wad: bigint): string {
+    return Number(formatUnits(wad, 18)).toFixed(4);
+}
+
+function feedAge(nowSecs: number, at: bigint): string {
+    if (at === 0n) return "never";
+    const secs = Math.max(0, nowSecs - Number(at));
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3_600) return `${Math.floor(secs / 60)}m ago`;
+    if (secs < 86_400) return `${Math.floor(secs / 3_600)}h ago`;
+    return `${Math.floor(secs / 86_400)}d ago`;
 }
 
 function Button({children, onClick, disabled}: {children: React.ReactNode; onClick: () => void; disabled?: boolean}) {
