@@ -1,6 +1,5 @@
 import type {Metadata} from "next";
 import Link from "next/link";
-import {COLLATERALS} from "@/lib/contracts";
 
 export const metadata: Metadata = {
     title: "SumUSD — Integrations",
@@ -16,9 +15,6 @@ const CONTRACTS = [
     {name: "SumUSD", role: "The ERC-20 token (18 decimals)", env: "NEXT_PUBLIC_SUMUSD_ADDRESS"},
     {name: "ImmutableTimelock", role: "Governance owner (96h delay)", env: "— (published on deploy)"},
 ];
-
-// Collateral flavors, paired to their frontend env vars by index (aligned to COLLATERALS).
-const FLAVOR_ENV = ["NEXT_PUBLIC_FLAVOR_A", "NEXT_PUBLIC_FLAVOR_B", "NEXT_PUBLIC_FLAVOR_C"];
 
 const NETWORKS = ["Ethereum mainnet", "Base", "Sepolia (testnet)"];
 
@@ -103,6 +99,22 @@ const CALLS: Call[] = [
         sig: "previewRedeemMix(uint256 sumUsdAmount) → (address[] tokens, uint256[] amounts)",
         selector: "0x0281a0ed",
         desc: "Quote the pro-rata basket slice a distress exit would return.",
+    },
+    {
+        name: "listedCollaterals",
+        target: "Engine",
+        write: false,
+        sig: "listedCollaterals() → address[]",
+        selector: "0x0995431b",
+        desc: "The full set of listed collateral flavors (enabled and frozen), up to 24. The entry point for discovering the basket on-chain instead of hardcoding it.",
+    },
+    {
+        name: "configs",
+        target: "Engine",
+        write: false,
+        sig: "configs(address token) → (bool enabled, uint8 decimals, uint16 redeemRateBps, address oracle, bool backingExcluded)",
+        selector: "0xfce89878",
+        desc: "Per-flavor config: whether deposits are enabled, cached token decimals, base redeem rate, its oracle, and whether it is backing-excluded (siloed).",
     },
     {
         name: "systemCollateralizationRatioBps",
@@ -256,35 +268,15 @@ export default function IntegrationsPage() {
                 </div>
 
                 <h3 className="mt-2 text-sm font-medium text-black/75">Collateral flavors</h3>
-                <div className="overflow-x-auto">
-                    <table className="w-full border-collapse text-sm">
-                        <thead>
-                            <tr className="border-b border-black/10 text-left text-xs uppercase tracking-wider text-black/45">
-                                <th className="py-2 pr-4 font-medium">Symbol</th>
-                                <th className="py-2 pr-4 font-medium">Decimals</th>
-                                <th className="py-2 pr-4 font-medium">Address</th>
-                                <th className="py-2 font-medium">Env var</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {COLLATERALS.map((c, i) => (
-                                <tr key={c.symbol} className="border-b border-black/[0.06]">
-                                    <td className="py-2.5 pr-4 font-medium text-black">{c.symbol}</td>
-                                    <td className="py-2.5 pr-4 tabular-nums text-black/60">{c.decimals}</td>
-                                    <td className="py-2.5 pr-4">
-                                        <Tba />
-                                    </td>
-                                    <td className="py-2.5">
-                                        <Mono>{FLAVOR_ENV[i] ?? "—"}</Mono>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-                <p className="text-xs leading-relaxed text-black/45">
-                    The accepted-collateral set is a governance-curated whitelist and changes only through a
-                    timelocked action; treat these as the reference flavors, not a fixed list.
+                <p className="text-sm leading-relaxed text-black/60">
+                    Flavor addresses are <span className="text-black/75">not configured or hardcoded</span>. The
+                    accepted-collateral set is a governance-curated whitelist that changes through timelocked{" "}
+                    <Mono>setCollateral</Mono> / <Mono>removeCollateral</Mono> actions, so this app and any
+                    integration should discover it on-chain rather than pin a list. Read{" "}
+                    <Mono>listedCollaterals()</Mono> for the full set (up to 24), then per token{" "}
+                    <Mono>configs(token)</Mono> for its cached decimals and enabled / backing-excluded status and
+                    the ERC-20 <Mono>symbol()</Mono> for a label. That is exactly what this frontend does (see{" "}
+                    <Mono>lib/useCollaterals.ts</Mono>), so a listing change needs no redeploy.
                 </p>
             </section>
 

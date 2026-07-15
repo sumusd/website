@@ -11,7 +11,8 @@ import {
     useWaitForTransactionReceipt,
     useWriteContract,
 } from "wagmi";
-import {COLLATERALS, ENGINE_ABI, ENGINE_ADDRESS, ERC20_ABI} from "@/lib/contracts";
+import {ENGINE_ABI, ENGINE_ADDRESS, ERC20_ABI} from "@/lib/contracts";
+import {useCollaterals} from "@/lib/useCollaterals";
 
 type Mode = "mint" | "redeem";
 
@@ -60,18 +61,22 @@ const FAQS: {q: string; a: string}[] = [
 
 export default function Home() {
     const {address, isConnected} = useAccount();
+    // The collateral basket, discovered on-chain (governance-curated, no hardcoded flavor list).
+    const {collaterals} = useCollaterals();
     const [mode, setMode] = useState<Mode>("mint");
     const [collateralIdx, setCollateralIdx] = useState(0);
     const [collateralPicked, setCollateralPicked] = useState(false);
     const [amount, setAmount] = useState("");
     // Batch redeem: split a burn across several flavors in one tx (normal mode only). One sumUSD amount
-    // per flavor, aligned to COLLATERALS; empty/zero legs are dropped before previewing or submitting.
+    // per flavor keyed by address; empty/zero legs are dropped before previewing or submitting.
     const [batch, setBatch] = useState(false);
-    const [batchAmounts, setBatchAmounts] = useState<string[]>(() => COLLATERALS.map(() => ""));
+    const [batchAmounts, setBatchAmounts] = useState<Record<string, string>>({});
 
-    const collateral = COLLATERALS[collateralIdx];
+    // Selected flavor for single mint/redeem; falls back to the first if the index is out of range
+    // (e.g. before the list loads or after the basket changes). Undefined only when the basket is empty.
+    const collateral = collaterals[collateralIdx] ?? collaterals[0];
     // On mint, the input is denominated in the collateral; on redeem, in SumUSD (18 decimals).
-    const inputDecimals = mode === "mint" ? collateral.decimals : 18;
+    const inputDecimals = mode === "mint" ? (collateral?.decimals ?? 18) : 18;
 
     const parsedAmount = useMemo(() => {
         try {
@@ -99,16 +104,18 @@ export default function Home() {
     // so a zero-amount leg (which redeemBatch would revert on) is never sent.
     const batchLegs = useMemo(
         () =>
-            COLLATERALS.map((c, i) => {
-                let amt = 0n;
-                try {
-                    amt = batchAmounts[i] ? parseUnits(batchAmounts[i], 18) : 0n;
-                } catch {
-                    amt = 0n;
-                }
-                return {collateral: c, amount: amt};
-            }).filter((l) => l.amount > 0n),
-        [batchAmounts],
+            collaterals
+                .map((c) => {
+                    let amt = 0n;
+                    try {
+                        amt = batchAmounts[c.address] ? parseUnits(batchAmounts[c.address], 18) : 0n;
+                    } catch {
+                        amt = 0n;
+                    }
+                    return {collateral: c, amount: amt};
+                })
+                .filter((l) => l.amount > 0n),
+        [collaterals, batchAmounts],
     );
     const batchTotal = batchLegs.reduce((sum, l) => sum + l.amount, 0n);
 
@@ -120,7 +127,7 @@ export default function Home() {
         query: {refetchInterval: 15_000},
     });
     const neededIdx = needed
-        ? COLLATERALS.findIndex((c) => c.address.toLowerCase() === (needed as string).toLowerCase())
+        ? collaterals.findIndex((c) => c.address.toLowerCase() === (needed as string).toLowerCase())
         : -1;
 
     // Default the deposit selector to the most-needed flavor until the user picks one themselves.
@@ -139,15 +146,15 @@ export default function Home() {
 
     // Per-flavor USD value, for the basket-composition bar.
     const {data: flavorValues} = useReadContracts({
-        contracts: COLLATERALS.map((c) => ({
+        contracts: collaterals.map((c) => ({
             address: ENGINE_ADDRESS,
             abi: ENGINE_ABI,
             functionName: "collateralValueUsd",
             args: [c.address],
         })),
-        query: {refetchInterval: 15_000},
+        query: {enabled: collaterals.length > 0, refetchInterval: 15_000},
     });
-    const composition = COLLATERALS.map((c, i) => ({
+    const composition = collaterals.map((c, i) => ({
         collateral: c,
         value: (flavorValues?.[i]?.result as bigint | undefined) ?? 0n,
         color: SEGMENT[i % SEGMENT.length],
@@ -158,15 +165,15 @@ export default function Home() {
 
     // Per-flavor price-feed health: [livePriceWad(price, ok), lastGoodPriceAt, valuationPriceWad] × N.
     const {data: feedReads} = useReadContracts({
-        contracts: COLLATERALS.flatMap((c) => [
+        contracts: collaterals.flatMap((c) => [
             {address: ENGINE_ADDRESS, abi: ENGINE_ABI, functionName: "livePriceWad", args: [c.address]},
             {address: ENGINE_ADDRESS, abi: ENGINE_ABI, functionName: "lastGoodPriceAt", args: [c.address]},
             {address: ENGINE_ADDRESS, abi: ENGINE_ABI, functionName: "valuationPriceWad", args: [c.address]},
         ]),
-        query: {refetchInterval: 15_000},
+        query: {enabled: collaterals.length > 0, refetchInterval: 15_000},
     });
     const nowSecs = Math.floor(Date.now() / 1000);
-    const feeds = COLLATERALS.map((c, i) => {
+    const feeds = collaterals.map((c, i) => {
         const live = feedReads?.[i * 3]?.result as readonly [bigint, boolean] | undefined;
         return {
             collateral: c,
@@ -181,8 +188,8 @@ export default function Home() {
         address: ENGINE_ADDRESS,
         abi: ENGINE_ABI,
         functionName: mode === "mint" ? "previewDeposit" : "previewRedeem",
-        args: [collateral.address, parsedAmount],
-        query: {enabled: parsedAmount > 0n && !redeemMixMode && !batchMode},
+        args: [collateral?.address, parsedAmount],
+        query: {enabled: !!collateral && parsedAmount > 0n && !redeemMixMode && !batchMode},
     });
 
     // Net per leg for the batch editor, priced on one snapshot exactly as redeemBatch pays out.
@@ -207,26 +214,28 @@ export default function Home() {
         address: ENGINE_ADDRESS,
         abi: ENGINE_ABI,
         functionName: "currentRedeemRateBps",
-        args: [collateral.address],
-        query: {enabled: mode === "redeem" && !distressed && !batchMode, refetchInterval: 15_000},
+        args: [collateral?.address],
+        query: {enabled: !!collateral && mode === "redeem" && !distressed && !batchMode, refetchInterval: 15_000},
     });
 
     const {data: allowance} = useReadContract({
-        address: collateral.address,
+        address: collateral?.address,
         abi: ERC20_ABI,
         functionName: "allowance",
         args: address ? [address, ENGINE_ADDRESS] : undefined,
-        query: {enabled: mode === "mint" && !!address},
+        query: {enabled: mode === "mint" && !!address && !!collateral},
     });
 
     const {writeContract, data: txHash, isPending} = useWriteContract();
     const {isLoading: isConfirming} = useWaitForTransactionReceipt({hash: txHash});
 
-    const needsApproval = mode === "mint" && parsedAmount > 0n && (allowance ?? 0n) < parsedAmount;
-    const outputDecimals = mode === "mint" ? 18 : collateral.decimals;
-    const outputSymbol = mode === "mint" ? "sumUSD" : collateral.symbol;
+    const needsApproval =
+        mode === "mint" && !!collateral && parsedAmount > 0n && (allowance ?? 0n) < parsedAmount;
+    const outputDecimals = mode === "mint" ? 18 : (collateral?.decimals ?? 18);
+    const outputSymbol = mode === "mint" ? "sumUSD" : (collateral?.symbol ?? "");
 
     function handleApprove() {
+        if (!collateral) return;
         writeContract({
             address: collateral.address,
             abi: ERC20_ABI,
@@ -237,6 +246,7 @@ export default function Home() {
 
     function handleSubmit() {
         if (mode === "mint") {
+            if (!collateral) return;
             writeContract({
                 address: ENGINE_ADDRESS,
                 abi: ENGINE_ABI,
@@ -264,6 +274,7 @@ export default function Home() {
                 ],
             });
         } else {
+            if (!collateral) return;
             writeContract({
                 address: ENGINE_ADDRESS,
                 abi: ENGINE_ABI,
@@ -353,7 +364,7 @@ export default function Home() {
                                     if (pct <= 0) return null;
                                     return (
                                         <div
-                                            key={c.symbol}
+                                            key={c.address}
                                             className={color}
                                             style={{width: `${pct}%`}}
                                             title={`${c.symbol}: ${pct.toFixed(1)}%`}
@@ -363,7 +374,7 @@ export default function Home() {
                         </div>
                         <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
                             {composition.map(({collateral: c, value, color}) => (
-                                <li key={c.symbol} className="flex items-center gap-1.5">
+                                <li key={c.address} className="flex items-center gap-1.5">
                                     <span className={`h-2 w-2 rounded-full ${color}`} aria-hidden />
                                     <span className="text-black/70">{c.symbol}</span>
                                     <span className="tabular-nums text-black/45">
@@ -390,7 +401,7 @@ export default function Home() {
                                         }
                                       : {price: 0n, label: "no price", dot: "bg-red-500", tone: "text-red-600"};
                                 return (
-                                    <li key={c.symbol} className="flex items-center justify-between gap-3 py-1.5">
+                                    <li key={c.address} className="flex items-center justify-between gap-3 py-1.5">
                                         <span className="flex items-center gap-1.5">
                                             <span className={`h-2 w-2 rounded-full ${status.dot}`} aria-hidden />
                                             <span className="text-black/70">{c.symbol}</span>
@@ -438,7 +449,11 @@ export default function Home() {
                         ))}
                     </div>
 
-                    {mode === "redeem" && !distressed && (
+                    {collaterals.length === 0 && (
+                        <p className="mb-3 text-xs text-black/45">Loading flavors from the engine…</p>
+                    )}
+
+                    {mode === "redeem" && !distressed && collaterals.length > 0 && (
                         <div className="mb-3 flex justify-end">
                             <button
                                 type="button"
@@ -453,20 +468,16 @@ export default function Home() {
                     {batchMode ? (
                         <div className="space-y-2">
                             <p className="mb-1 text-xs text-black/50">Burn sumUSD for each flavor</p>
-                            {COLLATERALS.map((c, i) => (
-                                <div key={c.symbol} className="flex items-center gap-2">
+                            {collaterals.map((c) => (
+                                <div key={c.address} className="flex items-center gap-2">
                                     <span className="w-16 shrink-0 text-sm text-black/70">{c.symbol}</span>
                                     <input
                                         inputMode="decimal"
                                         placeholder="0.0"
                                         aria-label={`sumUSD to redeem for ${c.symbol}`}
-                                        value={batchAmounts[i]}
+                                        value={batchAmounts[c.address] ?? ""}
                                         onChange={(e) =>
-                                            setBatchAmounts((prev) => {
-                                                const next = [...prev];
-                                                next[i] = e.target.value;
-                                                return next;
-                                            })
+                                            setBatchAmounts((prev) => ({...prev, [c.address]: e.target.value}))
                                         }
                                         className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-3 py-2 text-lg tabular-nums outline-none transition-colors duration-150 ease-out focus:border-emerald-500/70"
                                     />
@@ -501,8 +512,8 @@ export default function Home() {
                                     }}
                                     className="rounded-lg border border-black/10 bg-transparent px-3 py-2 outline-none transition-colors duration-150 ease-out focus:border-emerald-500/70 disabled:opacity-40"
                                 >
-                                    {COLLATERALS.map((c, i) => (
-                                        <option key={c.symbol} value={i}>
+                                    {collaterals.map((c, i) => (
+                                        <option key={c.address} value={i}>
                                             {c.symbol}
                                         </option>
                                     ))}
@@ -514,8 +525,8 @@ export default function Home() {
                     {mode === "mint" && neededIdx >= 0 && (
                         <p className="mt-2 text-xs text-emerald-700">
                             {neededIdx === collateralIdx
-                                ? `The pool needs ${COLLATERALS[neededIdx].symbol} most. Thanks for helping balance it.`
-                                : `The pool needs ${COLLATERALS[neededIdx].symbol} most; deposit it to help balance the basket.`}
+                                ? `The pool needs ${collaterals[neededIdx]?.symbol} most. Thanks for helping balance it.`
+                                : `The pool needs ${collaterals[neededIdx]?.symbol} most; deposit it to help balance the basket.`}
                         </p>
                     )}
 
@@ -527,7 +538,7 @@ export default function Home() {
                                     (mixPreview[0] as readonly string[])
                                         .map((tok, i) => {
                                             const amt = (mixPreview[1] as readonly bigint[])[i];
-                                            const c = COLLATERALS.find(
+                                            const c = collaterals.find(
                                                 (x) => x.address.toLowerCase() === tok.toLowerCase(),
                                             );
                                             if (!c || amt === 0n) return null;
@@ -626,7 +637,7 @@ export default function Home() {
                             <p className="text-center text-sm text-black/50">Connect a wallet to continue</p>
                         ) : needsApproval ? (
                             <Button onClick={handleApprove} disabled={busy}>
-                                {busy ? "Approving…" : `Approve ${collateral.symbol}`}
+                                {busy ? "Approving…" : `Approve ${collateral?.symbol ?? ""}`}
                             </Button>
                         ) : (
                             <Button

@@ -31,7 +31,10 @@ cp .env.example .env.local
 
 - `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` — from [WalletConnect Cloud](https://cloud.walletconnect.com)
 - `NEXT_PUBLIC_ENGINE_ADDRESS`, `NEXT_PUBLIC_SUMUSD_ADDRESS` — the deployed engine and token
-- `NEXT_PUBLIC_FLAVOR_A` / `_B` / `_C` — the whitelisted collateral addresses for the active network
+
+Collateral flavors are **not** configured here. The app discovers the whitelisted set on-chain from
+the engine (`listedCollaterals()` + per-token `configs()` / `symbol()`, see `lib/useCollaterals.ts`),
+so the UI tracks governance listings/removals automatically with no rebuild.
 
 For local development against an `anvil` chain, additionally set `NEXT_PUBLIC_ENABLE_LOCAL=true` and
 paste the addresses printed by the protocol repo's `SetupLocal` script; the read-only views then

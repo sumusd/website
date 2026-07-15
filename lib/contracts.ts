@@ -5,18 +5,17 @@ import type {Address} from "viem";
 export const ENGINE_ADDRESS = (process.env.NEXT_PUBLIC_ENGINE_ADDRESS ?? "0x0000000000000000000000000000000000000000") as Address;
 export const SUMUSD_ADDRESS = (process.env.NEXT_PUBLIC_SUMUSD_ADDRESS ?? "0x0000000000000000000000000000000000000000") as Address;
 
-/// Collateral flavors shown in the UI. Addresses come from env so testnet/mainnet differ.
+/// A collateral flavor. The basket is governance-curated and can change without a rebuild, so flavors
+/// are never hardcoded — they are discovered on-chain from the engine (see lib/useCollaterals.ts):
+/// `listedCollaterals()` gives the addresses, `configs(token)` the cached decimals + status, and the
+/// token's `symbol()` the label.
 export interface Collateral {
     symbol: string;
     address: Address;
     decimals: number;
+    enabled: boolean; // deposits allowed (redemption stays open even when false / frozen)
+    backingExcluded: boolean; // "siloed": value not counted toward backing/tilt
 }
-
-export const COLLATERALS: Collateral[] = [
-    {symbol: "FLAV-A", address: (process.env.NEXT_PUBLIC_FLAVOR_A ?? "0x0000000000000000000000000000000000000000") as Address, decimals: 6},
-    {symbol: "FLAV-B", address: (process.env.NEXT_PUBLIC_FLAVOR_B ?? "0x0000000000000000000000000000000000000000") as Address, decimals: 6},
-    {symbol: "FLAV-C", address: (process.env.NEXT_PUBLIC_FLAVOR_C ?? "0x0000000000000000000000000000000000000000") as Address, decimals: 18},
-];
 
 /// Minimal ABI for the engine — only what the frontend calls.
 export const ENGINE_ABI = [
@@ -110,6 +109,27 @@ export const ENGINE_ABI = [
         inputs: [],
         outputs: [{name: "", type: "address"}],
     },
+    // On-chain flavor discovery: the full listed set, and per-token config (cached decimals + status).
+    {
+        type: "function",
+        name: "listedCollaterals",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [{name: "", type: "address[]"}],
+    },
+    {
+        type: "function",
+        name: "configs",
+        stateMutability: "view",
+        inputs: [{name: "token", type: "address"}],
+        outputs: [
+            {name: "enabled", type: "bool"},
+            {name: "decimals", type: "uint8"},
+            {name: "redeemRateBps", type: "uint16"},
+            {name: "oracle", type: "address"},
+            {name: "backingExcluded", type: "bool"},
+        ],
+    },
     {
         type: "function",
         name: "currentRedeemRateBps",
@@ -167,8 +187,15 @@ export const ENGINE_ABI = [
     },
 ] as const;
 
-/// Standard ERC-20 subset for balances, allowances, and approvals.
+/// Standard ERC-20 subset for balances, allowances, approvals, and the display symbol.
 export const ERC20_ABI = [
+    {
+        type: "function",
+        name: "symbol",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [{name: "", type: "string"}],
+    },
     {
         type: "function",
         name: "balanceOf",
