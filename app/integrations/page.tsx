@@ -54,7 +54,7 @@ const CALLS: Call[] = [
         write: true,
         sig: "redeem(address collateral, uint256 sumUsdAmount, uint256 minCollateralOut) → uint256 collateralOut",
         selector: "0x2b83cccd",
-        desc: "Burn SumUSD for one flavor at par minus the weight-tilt haircut and fee. minCollateralOut is in the flavor's decimals. No approval needed — the engine burns your SumUSD directly.",
+        desc: "Burn SumUSD for one flavor at par minus the weight-tilt haircut and margin. minCollateralOut is in the flavor's decimals. No approval needed — the engine burns your SumUSD directly.",
     },
     {
         name: "redeemBatch",
@@ -86,7 +86,7 @@ const CALLS: Call[] = [
         write: false,
         sig: "previewRedeem(address collateral, uint256 sumUsdAmount) → uint256",
         selector: "0xcbe52ae3",
-        desc: "Quote the net collateral a single-flavor redeem returns (haircut and fee included). Matches the redeem payout.",
+        desc: "Quote the net collateral a single-flavor redeem returns (haircut and margin included). Matches the redeem payout.",
     },
     {
         name: "previewRedeemBatch",
@@ -118,7 +118,7 @@ const CALLS: Call[] = [
         write: false,
         sig: "currentRedeemRateBps(address collateral) → uint256",
         selector: "0x272f0606",
-        desc: "The current weight-tilt redemption rate for a flavor in bps (pre-fee).",
+        desc: "The current weight-tilt redemption rate for a flavor in bps (pre-margin).",
     },
 ];
 
