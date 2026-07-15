@@ -71,10 +71,26 @@ export default function Home() {
     // per flavor keyed by address; empty/zero legs are dropped before previewing or submitting.
     const [batch, setBatch] = useState(false);
     const [batchAmounts, setBatchAmounts] = useState<Record<string, string>>({});
+    const [nowSecs, setNowSecs] = useState(0); // wall-clock seconds, set after mount (see effect below)
 
-    // Selected flavor for single mint/redeem; falls back to the first if the index is out of range
-    // (e.g. before the list loads or after the basket changes). Undefined only when the basket is empty.
-    const collateral = collaterals[collateralIdx] ?? collaterals[0];
+    // The flavor the pool most needs — used to nudge deposits toward balance.
+    const {data: needed} = useReadContract({
+        address: ENGINE_ADDRESS,
+        abi: ENGINE_ABI,
+        functionName: "poolNeeds",
+        query: {refetchInterval: 15_000},
+    });
+    const neededIdx = needed
+        ? collaterals.findIndex((c) => c.address.toLowerCase() === (needed as string).toLowerCase())
+        : -1;
+
+    // Selected flavor for single mint/redeem. Until the user explicitly picks one, the deposit selector
+    // defaults to the pool's most-needed flavor (mint only) — derived during render, no effect syncing
+    // state. Falls back to the first flavor if the index is out of range; undefined only when the basket
+    // is empty.
+    const effectiveCollateralIdx =
+        !collateralPicked && mode === "mint" && neededIdx >= 0 ? neededIdx : collateralIdx;
+    const collateral = collaterals[effectiveCollateralIdx] ?? collaterals[0];
     // On mint, the input is denominated in the collateral; on redeem, in SumUSD (18 decimals).
     const inputDecimals = mode === "mint" ? (collateral?.decimals ?? 18) : 18;
 
@@ -119,23 +135,18 @@ export default function Home() {
     );
     const batchTotal = batchLegs.reduce((sum, l) => sum + l.amount, 0n);
 
-    // The flavor the pool most needs — used to nudge deposits toward balance.
-    const {data: needed} = useReadContract({
-        address: ENGINE_ADDRESS,
-        abi: ENGINE_ABI,
-        functionName: "poolNeeds",
-        query: {refetchInterval: 15_000},
-    });
-    const neededIdx = needed
-        ? collaterals.findIndex((c) => c.address.toLowerCase() === (needed as string).toLowerCase())
-        : -1;
-
-    // Default the deposit selector to the most-needed flavor until the user picks one themselves.
+    // Wall-clock seconds for the "last good … ago" feed labels. Set after mount only (never read during
+    // render) so it stays pure and free of SSR/hydration mismatch. Both updates run in timer callbacks,
+    // so no state is set synchronously in the effect body.
     useEffect(() => {
-        if (mode === "mint" && !collateralPicked && neededIdx >= 0 && neededIdx !== collateralIdx) {
-            setCollateralIdx(neededIdx);
-        }
-    }, [mode, collateralPicked, neededIdx, collateralIdx]);
+        const tick = () => setNowSecs(Math.floor(Date.now() / 1000));
+        const t = setTimeout(tick, 0);
+        const id = setInterval(tick, 30_000);
+        return () => {
+            clearTimeout(t);
+            clearInterval(id);
+        };
+    }, []);
 
     const {data: tvl} = useReadContract({
         address: ENGINE_ADDRESS,
@@ -172,7 +183,6 @@ export default function Home() {
         ]),
         query: {enabled: collaterals.length > 0, refetchInterval: 15_000},
     });
-    const nowSecs = Math.floor(Date.now() / 1000);
     const feeds = collaterals.map((c, i) => {
         const live = feedReads?.[i * 3]?.result as readonly [bigint, boolean] | undefined;
         return {
@@ -503,7 +513,7 @@ export default function Home() {
                                     className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-3 py-2 text-lg tabular-nums outline-none transition-colors duration-150 ease-out focus:border-emerald-500/70"
                                 />
                                 <select
-                                    value={collateralIdx}
+                                    value={effectiveCollateralIdx}
                                     disabled={redeemMixMode}
                                     aria-label={mode === "mint" ? "Collateral to deposit" : "Flavor to redeem"}
                                     onChange={(e) => {
@@ -524,7 +534,7 @@ export default function Home() {
 
                     {mode === "mint" && neededIdx >= 0 && (
                         <p className="mt-2 text-xs text-emerald-700">
-                            {neededIdx === collateralIdx
+                            {neededIdx === effectiveCollateralIdx
                                 ? `The pool needs ${collaterals[neededIdx]?.symbol} most. Thanks for helping balance it.`
                                 : `The pool needs ${collaterals[neededIdx]?.symbol} most; deposit it to help balance the basket.`}
                         </p>
