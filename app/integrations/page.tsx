@@ -122,7 +122,7 @@ const CALLS: Call[] = [
         write: false,
         sig: "systemCollateralizationRatioBps() → uint256 ratioBps",
         selector: "0x30912786",
-        desc: "System backing in bps (10000 = 100%). Returns ~uint256 max before the first deposit. Below 9900 the system is distressed and single-flavor redemption is disabled.",
+        desc: "System backing in bps (10000 = 100%). Returns ~uint256 max before the first deposit. Do NOT infer the regime from this: read distressed() instead.",
     },
     {
         name: "currentRedeemRateBps",
@@ -130,7 +130,39 @@ const CALLS: Call[] = [
         write: false,
         sig: "currentRedeemRateBps(address collateral) → uint256",
         selector: "0x272f0606",
-        desc: "The current weight-tilt redemption rate for a flavor in bps (pre-margin).",
+        desc: "The MARGINAL weight-tilt redemption rate for a flavor in bps (pre-margin, zero size). A real trade pays less: the tilt is priced on the post-redemption basket.",
+    },
+    {
+        name: "redeemRateBpsFor",
+        target: "Engine",
+        write: false,
+        sig: "redeemRateBpsFor(address collateral, uint256 sumUsdAmount) → uint256",
+        selector: "0x6e18abf7",
+        desc: "The rate a given SIZE actually prices at (pre-margin) — this is what redeem applies. Use it, not currentRedeemRateBps, to quote a specific trade.",
+    },
+    {
+        name: "distressed",
+        target: "Engine",
+        write: false,
+        sig: "distressed() → bool",
+        selector: "0x6d4ec725",
+        desc: "The distress LATCH. True ⇒ redeem/redeemBatch revert UseRedeemMix and holders exit via redeemMix. Latches instantly below 99% backing; clears only after backing holds ≥ 100.25% for 6h, so a recovered ratio does not mean redemption has reopened.",
+    },
+    {
+        name: "distressClearsAt",
+        target: "Engine",
+        write: false,
+        sig: "distressClearsAt() → uint256",
+        selector: "0xba72f13b",
+        desc: "Unix time at which distress clears if backing holds; 0 when not distressed or the countdown has not started.",
+    },
+    {
+        name: "pokeDistress",
+        target: "Engine",
+        write: true,
+        sig: "pokeDistress()",
+        selector: "0xe2cd1ff2",
+        desc: "Permissionless keeper hook: syncs the distress latch and advances the recovery countdown when the system is otherwise idle.",
     },
 ];
 
@@ -163,7 +195,11 @@ const SOLIDITY = `interface ISumUSDEngine {
 
     // --- Status (view) ---
     function systemCollateralizationRatioBps() external view returns (uint256 ratioBps);
-    function currentRedeemRateBps(address collateral) external view returns (uint256);
+    function currentRedeemRateBps(address collateral) external view returns (uint256);   // marginal
+    function redeemRateBpsFor(address collateral, uint256 sumUsdAmount) external view returns (uint256);
+    function distressed() external view returns (bool);
+    function distressClearsAt() external view returns (uint256);
+    function pokeDistress() external;
 }`;
 
 const VIEM = `import {parseUnits} from "viem";
@@ -197,8 +233,9 @@ await wallet.writeContract({
   ],
 });
 
-// --- Distress exit: when systemCollateralizationRatioBps() < 9900,
-//     redeem / redeemBatch revert (UseRedeemMix). Exit pro-rata instead: ---
+// --- Distress exit: when distressed() is true, redeem / redeemBatch revert
+//     (UseRedeemMix). Read the LATCH, not the ratio: it clears only after backing
+//     has held >= 100.25% for 6h, so a recovered ratio can still be gated. ---
 await wallet.writeContract({
   address: ENGINE_ADDRESS, abi: ENGINE_ABI, functionName: "redeemMix",
   args: [burn, []], // empty minOut skips per-token slippage checks

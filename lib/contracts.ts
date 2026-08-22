@@ -144,6 +144,33 @@ export const ENGINE_ABI = [
         inputs: [],
         outputs: [{name: "ratioBps", type: "uint256"}],
     },
+    // The distress LATCH. Read this rather than comparing the ratio to a threshold: entry is instant at
+    // 99% but the latch only clears once backing has held at/above 100.25% for 6h, so a recovered ratio
+    // does NOT mean single-flavor redeem is available again.
+    {
+        type: "function",
+        name: "distressed",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [{name: "", type: "bool"}],
+    },
+    {
+        type: "function",
+        name: "distressClearsAt",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [{name: "", type: "uint256"}],
+    },
+    {
+        type: "function",
+        name: "redeemRateBpsFor",
+        stateMutability: "view",
+        inputs: [
+            {name: "collateral", type: "address"},
+            {name: "sumUsdAmount", type: "uint256"},
+        ],
+        outputs: [{name: "", type: "uint256"}],
+    },
     {
         type: "function",
         name: "totalCollateralValueUsd",

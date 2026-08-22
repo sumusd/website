@@ -18,8 +18,18 @@ type Mode = "mint" | "redeem";
 
 // Mirrors MIN_MINT_RATIO_BPS in SumUSDEngine: minting is paused below 99% system backing.
 const MIN_MINT_RATIO_BPS = 9_900n;
-// Mirrors DISTRESS_RATIO_BPS: below this, single-flavor redeem is disabled in favor of pro-rata redeemMix.
-const DISTRESS_RATIO_BPS = 9_900n;
+// Mirrors the engine's distress constants. Entry is instant below ENTER; the latch clears only after
+// backing holds at/above EXIT for the recovery delay. `distressed()` on the engine is the real gate --
+// these are used only to explain the state to the user.
+const DISTRESS_EXIT_RATIO_BPS = 10_025n;
+
+/// Rough "time left" for the distress recovery countdown, from the engine's `distressClearsAt()`.
+function formatClearsIn(clearsAt: bigint): string {
+    const secs = Number(clearsAt) - Math.floor(Date.now() / 1000);
+    if (secs <= 0) return "moments";
+    if (secs < 3600) return `${Math.ceil(secs / 60)} min`;
+    return `${(secs / 3600).toFixed(1)} h`;
+}
 
 // A green ramp for the basket-composition bar/legend (data viz, not decoration), one entry per flavor.
 const SEGMENT = ["bg-emerald-600", "bg-emerald-400", "bg-emerald-300", "bg-emerald-700", "bg-emerald-200"];
@@ -109,9 +119,26 @@ export default function Home() {
         query: {refetchInterval: 15_000},
     });
 
-    // Distressed: backing below the distress line (but not the bootstrap "infinite" sentinel).
-    // In this regime single-flavor redeem is gated and holders exit pro-rata via redeemMix.
-    const distressed = ratioBps !== undefined && ratioBps <= 1_000_000n && ratioBps < DISTRESS_RATIO_BPS;
+    // Distress is a LATCH on the engine, not a threshold comparison: it engages instantly below 99% but
+    // clears only once backing has held at/above 100.25% for 6h. Reading the flag is the only correct
+    // source of truth -- inferring it from the ratio would show "healthy" during the recovery window and
+    // send the user into a redeem that reverts UseRedeemMix.
+    const {data: distressedFlag} = useReadContract({
+        address: ENGINE_ADDRESS,
+        abi: ENGINE_ABI,
+        functionName: "distressed",
+        query: {refetchInterval: 15_000},
+    });
+    const {data: distressClearsAt} = useReadContract({
+        address: ENGINE_ADDRESS,
+        abi: ENGINE_ABI,
+        functionName: "distressClearsAt",
+        query: {refetchInterval: 15_000, enabled: distressedFlag === true},
+    });
+    const distressed = distressedFlag === true;
+    // True when the shortfall is already repaired but the latch has not timed out yet.
+    const distressRecovering =
+        distressed && ratioBps !== undefined && ratioBps <= 1_000_000n && ratioBps >= DISTRESS_EXIT_RATIO_BPS;
     const redeemMixMode = mode === "redeem" && distressed;
     // Batch redeem is a normal-mode convenience only: below the distress line the engine forces redeemMix.
     const batchMode = mode === "redeem" && !distressed && batch;
@@ -304,13 +331,15 @@ export default function Home() {
         ratioBps === undefined ? "—" : ratioInfinite ? "∞" : `${(Number(ratioBps) / 100).toFixed(2)}%`;
 
     const systemState: {label: string; tone: "ok" | "bad" | "neutral"} =
-        ratioBps === undefined
+        ratioBps === undefined || distressedFlag === undefined
             ? {label: "Loading", tone: "neutral"}
-            : ratioInfinite
+            : ratioInfinite && !distressed
               ? {label: "Awaiting first deposit", tone: "neutral"}
-              : ratioBps < DISTRESS_RATIO_BPS
-                ? {label: "Under-collateralized", tone: "bad"}
-                : {label: "Fully backed", tone: "ok"};
+              : distressRecovering
+                ? {label: "Recovering", tone: "neutral"}
+                : distressed
+                  ? {label: "Under-collateralized", tone: "bad"}
+                  : {label: "Fully backed", tone: "ok"};
     const dotTone = {
         ok: "bg-emerald-500",
         bad: "bg-red-500",
@@ -625,9 +654,23 @@ export default function Home() {
 
                     {redeemMixMode && (
                         <p className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700">
-                            System backing is {ratioDisplay} (under-collateralized). Redemptions are pro-rata: you
-                            receive a proportional slice of every collateral, so all holders share the shortfall
-                            equally regardless of who redeems first.
+                            {distressRecovering ? (
+                                <>
+                                    Backing has recovered to {ratioDisplay}, but pro-rata redemption stays in effect
+                                    until it has held above 100.25% for six hours
+                                    {distressClearsAt !== undefined && distressClearsAt > 0n
+                                        ? ` (about ${formatClearsIn(distressClearsAt)} left)`
+                                        : ""}
+                                    . The wait stops a brief blip from re-opening pick-your-flavor redemption. You
+                                    receive a proportional slice of every collateral in the meantime.
+                                </>
+                            ) : (
+                                <>
+                                    System backing is {ratioDisplay} (under-collateralized). Redemptions are pro-rata:
+                                    you receive a proportional slice of every collateral, so all holders share the
+                                    shortfall equally regardless of who redeems first.
+                                </>
+                            )}
                         </p>
                     )}
 
