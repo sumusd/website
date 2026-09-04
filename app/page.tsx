@@ -326,7 +326,9 @@ export default function Home() {
     // Engine returns ~uint256 max when supply is 0 (bootstrap) — treat as "infinitely backed".
     const ratioInfinite = ratioBps !== undefined && ratioBps > 1_000_000n;
     const underMinMint = ratioBps !== undefined && ratioBps < MIN_MINT_RATIO_BPS;
-    const mintPaused = mode === "mint" && underMinMint;
+    // Minting is closed below the 99% floor AND for as long as the distress latch is set (the engine
+    // reverts MintDisabledInDistress there, even while backing reads above par during recovery).
+    const mintPaused = mode === "mint" && (underMinMint || distressed);
     const ratioDisplay =
         ratioBps === undefined ? "—" : ratioInfinite ? "∞" : `${(Number(ratioBps) / 100).toFixed(2)}%`;
 
@@ -676,8 +678,9 @@ export default function Home() {
 
                     {mintPaused && (
                         <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-700">
-                            Minting is paused: system backing is below 99%. Deposits resume automatically once
-                            backing recovers. Redemptions remain open.
+                            {distressed && !underMinMint
+                                ? "Minting is paused while the system is in distress recovery. Deposits resume automatically once backing has held above 100.25% for 6 hours. The pro-rata exit remains open."
+                                : "Minting is paused: system backing is below 99%. Deposits resume automatically once backing recovers. Redemptions remain open."}
                         </p>
                     )}
 

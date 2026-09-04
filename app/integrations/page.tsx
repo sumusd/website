@@ -42,7 +42,7 @@ const CALLS: Call[] = [
         write: true,
         sig: "deposit(address collateral, uint256 amount, uint256 minSumUsdOut) → uint256 minted",
         selector: "0x0efe6a8b",
-        desc: "Mint SumUSD 1:1 from an accepted collateral (normalized for decimals). minSumUsdOut is slippage protection (0 to skip). Reverts if the price is off-peg or system backing is under 99%.",
+        desc: "Mint SumUSD 1:1 from an accepted collateral (normalized for decimals). minSumUsdOut is slippage protection (0 to skip). Reverts if the price is off-peg, system backing is under 99%, or the distress latch is set (MintDisabledInDistress, even while backing reads above par during recovery).",
     },
     {
         name: "redeem",
@@ -66,7 +66,7 @@ const CALLS: Call[] = [
         write: true,
         sig: "redeemMix(uint256 sumUsdAmount, uint256[] minOut) → uint256[] amounts",
         selector: "0x351a7689",
-        desc: "Distress exit, callable only when backing is below 99%: burn SumUSD for a pro-rata slice of the entire basket. Pass an empty minOut array to skip per-token slippage checks.",
+        desc: "Distress exit, callable only while distressed(): burn SumUSD for a pro-rata slice of the entire basket, capped at $1 of backing per SumUSD (slices are scaled by supply/backing while backing is above 100%). Pass an empty minOut array to skip per-token slippage checks.",
     },
     {
         name: "previewDeposit",
@@ -98,7 +98,7 @@ const CALLS: Call[] = [
         write: false,
         sig: "previewRedeemMix(uint256 sumUsdAmount) → (address[] tokens, uint256[] amounts)",
         selector: "0x0281a0ed",
-        desc: "Quote the pro-rata basket slice a distress exit would return.",
+        desc: "Quote the pro-rata basket slice a distress exit would return, including the above-par cap.",
     },
     {
         name: "listedCollaterals",
@@ -181,7 +181,7 @@ const SOLIDITY = `interface ISumUSDEngine {
         uint256[] calldata minOuts
     ) external returns (uint256[] memory collateralOuts);
 
-    // Distress-only pro-rata exit (below 99% backing)
+    // Distress-only pro-rata exit (while distressed(); slices capped at $1 of backing per SumUSD)
     function redeemMix(uint256 sumUsdAmount, uint256[] calldata minOut)
         external returns (uint256[] memory amounts);
 
